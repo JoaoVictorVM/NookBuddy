@@ -1,12 +1,16 @@
 package ui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"nookbuddy/internal/storage"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 type Screen interface {
 	Title() string
 	ItemCount() int
-	View(selected int) string
-	Activate(selected int) tea.Cmd
+	View(selected int, state storage.PlayerState) string
+	Activate(selected int, state storage.PlayerState) (next storage.PlayerState, changed bool, cmd tea.Cmd)
 }
 
 func clamp(selected, itemCount int) int {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"nookbuddy/internal/storage"
+	"slices"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,21 +17,25 @@ type Saver interface {
 	Save(ctx context.Context, state storage.PlayerState) (storage.SaveResult, error)
 }
 
-type savedMsg struct {
+type saveResultMsg struct {
 	err error
 }
 
 type Model struct {
-	screens     []Screen
-	active      int
-	selected    int
-	width       int
-	height      int
-	quitting    bool
-	saver       Saver
-	state       storage.PlayerState
-	saveTimeout time.Duration
-	crash       *crashRecorder
+	screens      []Screen
+	active       int
+	selected     int
+	width        int
+	height       int
+	quitting     bool
+	saver        Saver
+	state        storage.PlayerState
+	saveTimeout  time.Duration
+	saving       bool
+	pendingSave  bool
+	saveFailed   bool
+	quitDeadline time.Time
+	crash        *crashRecorder
 }
 
 func NewModel(saver Saver, state storage.PlayerState, screens []Screen) Model {
@@ -76,11 +81,8 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-	case savedMsg:
-		if msg.err != nil {
-			slog.Error("nookbuddy: final save failed", "error", msg.err)
-		}
-		return m, tea.Quit
+	case saveResultMsg:
+		return m.saveFinished(msg.err)
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 {
 			return m.handleRunes(msg.Runes)
@@ -120,10 +122,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.selected = clamp(m.selected+1, m.activeScreen().ItemCount())
 	case "enter":
 		if m.activeScreen().ItemCount() > 0 {
-			return m, m.activeScreen().Activate(m.selected)
+			return m.activate()
 		}
 	}
 	return m, nil
+}
+
+func (m Model) activate() (Model, tea.Cmd) {
+	next, changed, cmd := m.activeScreen().Activate(m.selected, m.state)
+	if !changed {
+		return m, cmd
+	}
+	m.state = next
+	m, save := m.requestSave()
+	return m, tea.Batch(cmd, save)
 }
 
 func (m Model) switchTo(index int) Model {
@@ -143,12 +155,55 @@ func (m Model) quit() (Model, tea.Cmd) {
 	if m.saver == nil {
 		return m, tea.Quit
 	}
-	return m, saveCmd(m.saver, m.state, m.saveTimeout)
+	m.quitDeadline = time.Now().Add(m.saveTimeout)
+	if m.saving {
+		m.pendingSave = true
+		return m, nil
+	}
+	return m.startSave()
 }
 
-func saveCmd(saver Saver, state storage.PlayerState, timeout time.Duration) tea.Cmd {
+func (m Model) requestSave() (Model, tea.Cmd) {
+	if m.saver == nil {
+		return m, nil
+	}
+	if m.saving {
+		m.pendingSave = true
+		return m, nil
+	}
+	return m.startSave()
+}
+
+func (m Model) startSave() (Model, tea.Cmd) {
+	m.saving = true
+	deadline := time.Now().Add(m.saveTimeout)
+	if m.quitting && deadline.After(m.quitDeadline) {
+		deadline = m.quitDeadline
+	}
+	snapshot := m.state
+	snapshot.OwnedCosmetics = slices.Clone(m.state.OwnedCosmetics)
+	return m, saveCmd(m.saver, snapshot, deadline)
+}
+
+func (m Model) saveFinished(err error) (Model, tea.Cmd) {
+	m.saving = false
+	m.saveFailed = err != nil
+	if err != nil {
+		slog.Error("nookbuddy: save failed", "error", err, "final", m.quitting)
+	}
+	if m.pendingSave {
+		m.pendingSave = false
+		return m.startSave()
+	}
+	if m.quitting {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func saveCmd(saver Saver, state storage.PlayerState, deadline time.Time) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
 		defer cancel()
 
 		done := make(chan error, 1)
@@ -159,9 +214,9 @@ func saveCmd(saver Saver, state storage.PlayerState, timeout time.Duration) tea.
 
 		select {
 		case err := <-done:
-			return savedMsg{err: err}
+			return saveResultMsg{err: err}
 		case <-ctx.Done():
-			return savedMsg{err: ctx.Err()}
+			return saveResultMsg{err: ctx.Err()}
 		}
 	}
 }
@@ -172,7 +227,7 @@ func (m Model) view() string {
 		bodyHeight = m.height - 1
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, renderRoom(bodyHeight), m.renderScreen(bodyHeight))
-	return lipgloss.JoinVertical(lipgloss.Left, body, renderFooter(m.quitting))
+	return lipgloss.JoinVertical(lipgloss.Left, body, renderFooter(m.quitting, m.saveFailed))
 }
 
 func (m Model) renderScreen(height int) string {
@@ -186,7 +241,7 @@ func (m Model) renderScreen(height int) string {
 
 	content := ""
 	if len(m.screens) > 0 {
-		content = renderTabs(m.screens, m.active) + "\n\n" + m.activeScreen().View(m.selected)
+		content = renderTabs(m.screens, m.active) + "\n\n" + m.activeScreen().View(m.selected, m.state)
 	}
 	return style.Render(content)
 }

@@ -20,6 +20,8 @@ type fakeScreen struct {
 	activateCmd   tea.Cmd
 	panicOnEnter  bool
 	panicOnView   bool
+	goldDelta     int
+	seenGold      []int
 	mu            sync.Mutex
 	activatedWith []int
 }
@@ -27,21 +29,26 @@ type fakeScreen struct {
 func (f *fakeScreen) Title() string  { return f.title }
 func (f *fakeScreen) ItemCount() int { return f.items }
 
-func (f *fakeScreen) View(selected int) string {
+func (f *fakeScreen) View(selected int, state storage.PlayerState) string {
 	if f.panicOnView {
 		panic("view exploded")
 	}
 	return f.title + " body"
 }
 
-func (f *fakeScreen) Activate(selected int) tea.Cmd {
+func (f *fakeScreen) Activate(selected int, state storage.PlayerState) (storage.PlayerState, bool, tea.Cmd) {
 	if f.panicOnEnter {
 		panic("activate exploded")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.activatedWith = append(f.activatedWith, selected)
-	return f.activateCmd
+	f.seenGold = append(f.seenGold, state.Gold)
+	if f.goldDelta != 0 {
+		state.Gold += f.goldDelta
+		return state, true, f.activateCmd
+	}
+	return state, false, f.activateCmd
 }
 
 func (f *fakeScreen) activations() []int {
@@ -289,9 +296,9 @@ func TestModel_QuitKeySetsQuittingAndReturnsSaveCmd(t *testing.T) {
 		t.Fatal("q returned no command, want the save command")
 	}
 
-	saved, ok := cmd().(savedMsg)
+	saved, ok := cmd().(saveResultMsg)
 	if !ok {
-		t.Fatalf("save command returned %T, want savedMsg", cmd())
+		t.Fatalf("save command returned %T, want saveResultMsg", cmd())
 	}
 	if saved.err != nil {
 		t.Fatalf("save failed: %v", saved.err)
@@ -328,9 +335,9 @@ func TestModel_CtrlCTriggersSameQuitPathAsQ(t *testing.T) {
 	if !m.quitting {
 		t.Fatal("quitting = false after ctrl+c")
 	}
-	saved, ok := cmd().(savedMsg)
+	saved, ok := cmd().(saveResultMsg)
 	if !ok || saved.err != nil {
-		t.Fatalf("ctrl+c save = %#v, want a successful savedMsg", cmd())
+		t.Fatalf("ctrl+c save = %#v, want a successful saveResultMsg", cmd())
 	}
 	if _, next := send(t, m, saved); !isQuit(next) {
 		t.Error("ctrl+c did not lead to tea.Quit")
@@ -369,7 +376,7 @@ func TestModel_SaveTimeoutStillQuits(t *testing.T) {
 
 	m, cmd := send(t, m, key("q"))
 	began := time.Now()
-	saved := cmd().(savedMsg)
+	saved := cmd().(saveResultMsg)
 	if elapsed := time.Since(began); elapsed > time.Second {
 		t.Fatalf("save command took %v, want it bounded by the timeout", elapsed)
 	}
@@ -380,7 +387,7 @@ func TestModel_SaveTimeoutStillQuits(t *testing.T) {
 	if _, next := send(t, m, saved); !isQuit(next) {
 		t.Error("a timed-out save did not lead to tea.Quit")
 	}
-	if !logs.has(slog.LevelError, "final save failed") {
+	if !logs.has(slog.LevelError, "save failed") {
 		t.Error("the failed final save was not logged")
 	}
 }
@@ -455,5 +462,216 @@ func TestModel_BatchedRunesStopAfterQuit(t *testing.T) {
 	}
 	if !isQuit(cmd) {
 		t.Error("batched q did not quit")
+	}
+}
+
+func collect(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var out []tea.Msg
+		for _, inner := range batch {
+			out = append(out, collect(inner)...)
+		}
+		return out
+	}
+	return []tea.Msg{msg}
+}
+
+func saveResults(msgs []tea.Msg) []saveResultMsg {
+	var out []saveResultMsg
+	for _, msg := range msgs {
+		if result, ok := msg.(saveResultMsg); ok {
+			out = append(out, result)
+		}
+	}
+	return out
+}
+
+type countingSaver struct {
+	mu        sync.Mutex
+	states    []storage.PlayerState
+	deadlines []time.Time
+	err       error
+}
+
+func (c *countingSaver) Save(ctx context.Context, state storage.PlayerState) (storage.SaveResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	deadline, _ := ctx.Deadline()
+	c.states = append(c.states, state)
+	c.deadlines = append(c.deadlines, deadline)
+	return storage.SaveResult{OK: c.err == nil}, c.err
+}
+
+func (c *countingSaver) calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.states)
+}
+
+func goldScreens(delta int) []Screen {
+	screens := threeScreens()
+	screens[0].(*fakeScreen).goldDelta = delta
+	return screens
+}
+
+func TestModel_ActivateReceivesCurrentState(t *testing.T) {
+	screens := threeScreens()
+	m := NewModel(nil, storage.PlayerState{Gold: 33}, screens)
+	_, _ = send(t, m, key("enter"))
+	if got := screens[0].(*fakeScreen).seenGold; len(got) != 1 || got[0] != 33 {
+		t.Errorf("Activate saw gold %v, want [33]", got)
+	}
+}
+
+func TestModel_EnterWithChangedStateTriggersSaveCmd(t *testing.T) {
+	store, path := openTempStore(t)
+	m := NewModel(store, storage.PlayerState{Gold: 60}, goldScreens(-50))
+
+	m, cmd := send(t, m, key("enter"))
+	if m.state.Gold != 10 {
+		t.Fatalf("model gold = %d, want 10 right after the change", m.state.Gold)
+	}
+	results := saveResults(collect(cmd))
+	if len(results) != 1 || results[0].err != nil {
+		t.Fatalf("save results = %+v, want one successful save", results)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, _, err := storage.Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	got, err := reopened.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Gold != 10 {
+		t.Errorf("persisted gold = %d, want 10 without quitting", got.Gold)
+	}
+}
+
+func TestModel_EnterWithUnchangedStateDoesNotTriggerSaveCmd(t *testing.T) {
+	saver := &countingSaver{}
+	m := NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(0))
+
+	_, cmd := send(t, m, key("enter"))
+	collect(cmd)
+	if saver.calls() != 0 {
+		t.Errorf("Save called %d times for an unchanged state, want 0", saver.calls())
+	}
+}
+
+func TestModel_SaveAfterChangeDoesNotQuit(t *testing.T) {
+	saver := &countingSaver{}
+	m, cmd := send(t, NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
+
+	m, next := send(t, m, saveResults(collect(cmd))[0])
+	if isQuit(next) || m.quitting {
+		t.Fatal("finishing a purchase save quit the app")
+	}
+	if m.saving {
+		t.Error("model still marked as saving after the result arrived")
+	}
+}
+
+func TestModel_SavesAreSerializedAndUseTheLatestState(t *testing.T) {
+	saver := &countingSaver{}
+	m := NewModel(saver, storage.PlayerState{Gold: 100}, goldScreens(-10))
+
+	m, first := send(t, m, key("enter"))
+	m, second := send(t, m, key("enter"))
+	m, third := send(t, m, key("enter"))
+	if len(saveResults(collect(second))) != 0 || len(saveResults(collect(third))) != 0 {
+		t.Fatal("a second save started while one was in flight")
+	}
+	if !m.pendingSave {
+		t.Fatal("changes during an in-flight save were not marked pending")
+	}
+
+	m, follow := send(t, m, saveResults(collect(first))[0])
+	results := saveResults(collect(follow))
+	if len(results) != 1 {
+		t.Fatalf("follow-up saves = %d, want exactly 1", len(results))
+	}
+	if saver.calls() != 2 {
+		t.Fatalf("Save calls = %d, want 2", saver.calls())
+	}
+	if got := saver.states[1].Gold; got != 70 {
+		t.Errorf("follow-up save wrote gold %d, want the latest 70", got)
+	}
+
+	m, last := send(t, m, results[0])
+	if last != nil || m.saving || m.pendingSave {
+		t.Error("model kept saving after the latest state was written")
+	}
+}
+
+func TestModel_QuitWaitsForInFlightSave(t *testing.T) {
+	saver := &countingSaver{}
+	m, purchase := send(t, NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
+
+	m, cmd := send(t, m, key("q"))
+	if !m.quitting || cmd != nil {
+		t.Fatal("q during an in-flight save started a concurrent final save")
+	}
+
+	m, final := send(t, m, saveResults(collect(purchase))[0])
+	finalMsgs := collect(final)
+	for _, msg := range finalMsgs {
+		if _, quit := msg.(tea.QuitMsg); quit {
+			t.Fatal("app quit before the final save")
+		}
+	}
+	results := saveResults(finalMsgs)
+	if len(results) != 1 || saver.calls() != 2 {
+		t.Fatalf("final save did not run: results=%d calls=%d", len(results), saver.calls())
+	}
+	if !saver.deadlines[1].Equal(m.quitDeadline) && saver.deadlines[1].After(m.quitDeadline) {
+		t.Errorf("final save deadline %v is after the quit deadline %v", saver.deadlines[1], m.quitDeadline)
+	}
+
+	if _, done := send(t, m, results[0]); !isQuit(done) {
+		t.Error("app did not quit after the final save")
+	}
+}
+
+func TestModel_FailedSaveShowsWarningUntilNextSuccess(t *testing.T) {
+	logs := captureLogs(t)
+	saver := &countingSaver{err: errors.New("disk is read-only")}
+	m, cmd := send(t, NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(-5)), key("enter"))
+
+	m, _ = send(t, m, saveResults(collect(cmd))[0])
+	if !m.saveFailed || !strings.Contains(plain(m.View()), "Last save failed — retrying") {
+		t.Fatal("a failed save did not show the warning")
+	}
+	if m.state.Gold != 55 {
+		t.Errorf("in-memory gold = %d, want 55 kept after a failed save", m.state.Gold)
+	}
+	if !logs.has(slog.LevelError, "save failed") {
+		t.Error("the failed save was not logged")
+	}
+
+	saver.err = nil
+	m, cmd = send(t, m, key("enter"))
+	m, _ = send(t, m, saveResults(collect(cmd))[0])
+	if m.saveFailed || strings.Contains(plain(m.View()), "Last save failed") {
+		t.Error("the warning stayed after a successful save")
+	}
+}
+
+func TestModel_ChangeWithoutStoreKeepsStateInMemory(t *testing.T) {
+	m, cmd := send(t, NewModel(nil, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
+	if m.state.Gold != 10 || m.saving {
+		t.Errorf("memory-only change: gold=%d saving=%v, want 10/false", m.state.Gold, m.saving)
+	}
+	if len(saveResults(collect(cmd))) != 0 {
+		t.Error("memory-only mode tried to save")
 	}
 }

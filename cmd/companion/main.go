@@ -54,7 +54,7 @@ func run() int {
 		saver = store
 	}
 
-	model := ui.NewModel(saver, state, []ui.Screen{screens.Sell{}, screens.Upgrades{}, screens.Customize{}})
+	model := ui.NewModel(saver, state, []ui.Screen{screens.Sell{}, screens.NewUpgrades(), screens.Customize{}})
 	_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
 
 	if errors.Is(err, tea.ErrProgramPanic) {
