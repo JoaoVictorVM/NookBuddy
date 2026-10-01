@@ -1,0 +1,41 @@
+version: 2
+
+project_name: nookbuddy
+
+before:
+  hooks:
+    - go mod download
+    - sqlc generate
+
+builds:
+  - id: nookbuddy
+    main: ./cmd/companion
+    binary: nookbuddy
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - windows
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X nookbuddy/internal/version.Version={{ .Version }}
+      - -X nookbuddy/internal/version.Commit={{ .ShortCommit }}
+      - -X nookbuddy/internal/version.Date={{ time "2006-01-02" }}
+
+archives:
+  - id: nookbuddy
+    formats:
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
