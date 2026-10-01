@@ -30,6 +30,11 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Version flag smoke check
+        run: |
+          go build -ldflags "-X nookbuddy/internal/version.Version=0.0.0-ci -X nookbuddy/internal/version.Commit=${GITHUB_SHA::7}" -o bin/version-check.exe ./cmd/companion
+          ./bin/version-check.exe --version | tee /dev/stderr | grep -F "NookBuddy v0.0.0-ci (${GITHUB_SHA::7}, unknown)"
+
       - name: Vet
         run: go vet ./...
 
