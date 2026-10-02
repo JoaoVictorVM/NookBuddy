@@ -107,3 +107,39 @@ func TestSource_EventsFlowThroughCmdUnderRace(t *testing.T) {
 		t.Errorf("clicks = %d, keys = %d, want both to flow through", clicks, keys)
 	}
 }
+
+type channelSource struct {
+	events chan Event
+}
+
+func (c channelSource) Events() <-chan Event { return c.events }
+
+func TestCmd_AcceptsFakeEventSource(t *testing.T) {
+	source := channelSource{events: make(chan Event, 300)}
+	for i := range 300 {
+		kind := Click
+		if i%3 == 0 {
+			kind = Key
+		}
+		source.events <- Event{Type: kind, Timestamp: time.Now()}
+	}
+
+	first, ok := Cmd(source)().(InputEventMsg)
+	if !ok || len(first.Events) != batchLimit {
+		t.Fatalf("first drain = %#v, want %d events", first, batchLimit)
+	}
+	if first.Events[0].Type != Key || first.Events[1].Type != Click {
+		t.Error("drain from a fake source does not preserve order")
+	}
+	second, ok := Cmd(source)().(InputEventMsg)
+	if !ok || len(second.Events) != 300-batchLimit {
+		t.Fatalf("second drain = %d events, want %d", len(second.Events), 300-batchLimit)
+	}
+	if Cmd(source)() != nil {
+		t.Error("drain of an empty fake source returned a message, want nil")
+	}
+}
+
+func TestCmd_SourceSatisfiesEventSource(t *testing.T) {
+	var _ EventSource = NewSource()
+}

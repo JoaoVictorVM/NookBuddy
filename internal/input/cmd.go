@@ -8,7 +8,11 @@ type InputEventMsg struct {
 	Events []Event
 }
 
-func Cmd(source *Source) tea.Cmd {
+type EventSource interface {
+	Events() <-chan Event
+}
+
+func Cmd(source EventSource) tea.Cmd {
 	return func() tea.Msg {
 		return drain(source.Events())
 	}
