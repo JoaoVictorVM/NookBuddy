@@ -103,7 +103,7 @@ func press(t *testing.T, m Model, keys ...string) Model {
 }
 
 func newTestModel() Model {
-	return NewModel(nil, storage.PlayerState{}, threeScreens())
+	return NewModel(nil, nil, storage.PlayerState{}, threeScreens())
 }
 
 func openTempStore(t *testing.T) (*storage.Store, string) {
@@ -258,7 +258,7 @@ func TestModel_EnterCallsActivateOnActiveScreen(t *testing.T) {
 	screens := threeScreens()
 	upgrades := screens[1].(*fakeScreen)
 	upgrades.activateCmd = func() tea.Msg { return "bought" }
-	m := NewModel(nil, storage.PlayerState{}, screens)
+	m := NewModel(nil, nil, storage.PlayerState{}, screens)
 
 	m = press(t, m, "2", "down", "down")
 	_, cmd := send(t, m, key("enter"))
@@ -276,7 +276,7 @@ func TestModel_EnterCallsActivateOnActiveScreen(t *testing.T) {
 
 func TestModel_EnterOnEmptyScreenDoesNotActivate(t *testing.T) {
 	screens := threeScreens()
-	m := press(t, NewModel(nil, storage.PlayerState{}, screens), "3", "enter")
+	m := press(t, NewModel(nil, nil, storage.PlayerState{}, screens), "3", "enter")
 	if got := screens[2].(*fakeScreen).activations(); len(got) != 0 {
 		t.Errorf("Activate called on an empty screen: %v", got)
 	}
@@ -286,7 +286,7 @@ func TestModel_EnterOnEmptyScreenDoesNotActivate(t *testing.T) {
 func TestModel_QuitKeySetsQuittingAndReturnsSaveCmd(t *testing.T) {
 	store, path := openTempStore(t)
 	state := storage.PlayerState{Gold: 77, ClicksProgress: 12, KeysProgress: 34, ProjectsReady: 2, UpgradeValueLevel: 1, OwnedCosmetics: []string{"rug"}}
-	m := NewModel(store, state, threeScreens())
+	m := NewModel(store, nil, state, threeScreens())
 
 	m, cmd := send(t, m, key("q"))
 	if !m.quitting {
@@ -329,7 +329,7 @@ func TestModel_QuitKeySetsQuittingAndReturnsSaveCmd(t *testing.T) {
 
 func TestModel_CtrlCTriggersSameQuitPathAsQ(t *testing.T) {
 	store, _ := openTempStore(t)
-	m := NewModel(store, storage.PlayerState{Gold: 5}, threeScreens())
+	m := NewModel(store, nil, storage.PlayerState{Gold: 5}, threeScreens())
 
 	m, cmd := send(t, m, key("ctrl+c"))
 	if !m.quitting {
@@ -346,7 +346,7 @@ func TestModel_CtrlCTriggersSameQuitPathAsQ(t *testing.T) {
 
 func TestModel_KeysAreIgnoredWhileSaving(t *testing.T) {
 	store, _ := openTempStore(t)
-	m, _ := send(t, NewModel(store, storage.PlayerState{}, threeScreens()), key("q"))
+	m, _ := send(t, NewModel(store, nil, storage.PlayerState{}, threeScreens()), key("q"))
 
 	after, cmd := send(t, m, key("2"))
 	if after.active != 0 || cmd != nil {
@@ -371,7 +371,7 @@ func TestModel_SaveTimeoutStillQuits(t *testing.T) {
 	saver := blockingSaver{release: make(chan struct{})}
 	t.Cleanup(func() { close(saver.release) })
 
-	m := NewModel(saver, storage.PlayerState{}, threeScreens())
+	m := NewModel(saver, nil, storage.PlayerState{}, threeScreens())
 	m.saveTimeout = 50 * time.Millisecond
 
 	m, cmd := send(t, m, key("q"))
@@ -441,7 +441,7 @@ func TestModel_ViewFitsTheTerminal(t *testing.T) {
 
 func TestModel_ViewShowsSavingWhileQuitting(t *testing.T) {
 	store, _ := openTempStore(t)
-	m, _ := send(t, NewModel(store, storage.PlayerState{}, threeScreens()), key("q"))
+	m, _ := send(t, NewModel(store, nil, storage.PlayerState{}, threeScreens()), key("q"))
 	out := plain(m.View())
 	if !strings.Contains(out, "Saving…") || strings.Contains(out, "q quit") {
 		t.Error("footer does not switch to Saving… during the final save")
@@ -520,7 +520,7 @@ func goldScreens(delta int) []Screen {
 
 func TestModel_ActivateReceivesCurrentState(t *testing.T) {
 	screens := threeScreens()
-	m := NewModel(nil, storage.PlayerState{Gold: 33}, screens)
+	m := NewModel(nil, nil, storage.PlayerState{Gold: 33}, screens)
 	_, _ = send(t, m, key("enter"))
 	if got := screens[0].(*fakeScreen).seenGold; len(got) != 1 || got[0] != 33 {
 		t.Errorf("Activate saw gold %v, want [33]", got)
@@ -529,7 +529,7 @@ func TestModel_ActivateReceivesCurrentState(t *testing.T) {
 
 func TestModel_EnterWithChangedStateTriggersSaveCmd(t *testing.T) {
 	store, path := openTempStore(t)
-	m := NewModel(store, storage.PlayerState{Gold: 60}, goldScreens(-50))
+	m := NewModel(store, nil, storage.PlayerState{Gold: 60}, goldScreens(-50))
 
 	m, cmd := send(t, m, key("enter"))
 	if m.state.Gold != 10 {
@@ -559,7 +559,7 @@ func TestModel_EnterWithChangedStateTriggersSaveCmd(t *testing.T) {
 
 func TestModel_EnterWithUnchangedStateDoesNotTriggerSaveCmd(t *testing.T) {
 	saver := &countingSaver{}
-	m := NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(0))
+	m := NewModel(saver, nil, storage.PlayerState{Gold: 60}, goldScreens(0))
 
 	_, cmd := send(t, m, key("enter"))
 	collect(cmd)
@@ -570,7 +570,7 @@ func TestModel_EnterWithUnchangedStateDoesNotTriggerSaveCmd(t *testing.T) {
 
 func TestModel_SaveAfterChangeDoesNotQuit(t *testing.T) {
 	saver := &countingSaver{}
-	m, cmd := send(t, NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
+	m, cmd := send(t, NewModel(saver, nil, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
 
 	m, next := send(t, m, saveResults(collect(cmd))[0])
 	if isQuit(next) || m.quitting {
@@ -583,7 +583,7 @@ func TestModel_SaveAfterChangeDoesNotQuit(t *testing.T) {
 
 func TestModel_SavesAreSerializedAndUseTheLatestState(t *testing.T) {
 	saver := &countingSaver{}
-	m := NewModel(saver, storage.PlayerState{Gold: 100}, goldScreens(-10))
+	m := NewModel(saver, nil, storage.PlayerState{Gold: 100}, goldScreens(-10))
 
 	m, first := send(t, m, key("enter"))
 	m, second := send(t, m, key("enter"))
@@ -615,7 +615,7 @@ func TestModel_SavesAreSerializedAndUseTheLatestState(t *testing.T) {
 
 func TestModel_QuitWaitsForInFlightSave(t *testing.T) {
 	saver := &countingSaver{}
-	m, purchase := send(t, NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
+	m, purchase := send(t, NewModel(saver, nil, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
 
 	m, cmd := send(t, m, key("q"))
 	if !m.quitting || cmd != nil {
@@ -645,7 +645,7 @@ func TestModel_QuitWaitsForInFlightSave(t *testing.T) {
 func TestModel_FailedSaveShowsWarningUntilNextSuccess(t *testing.T) {
 	logs := captureLogs(t)
 	saver := &countingSaver{err: errors.New("disk is read-only")}
-	m, cmd := send(t, NewModel(saver, storage.PlayerState{Gold: 60}, goldScreens(-5)), key("enter"))
+	m, cmd := send(t, NewModel(saver, nil, storage.PlayerState{Gold: 60}, goldScreens(-5)), key("enter"))
 
 	m, _ = send(t, m, saveResults(collect(cmd))[0])
 	if !m.saveFailed || !strings.Contains(plain(m.View()), "Last save failed — retrying") {
@@ -667,7 +667,7 @@ func TestModel_FailedSaveShowsWarningUntilNextSuccess(t *testing.T) {
 }
 
 func TestModel_ChangeWithoutStoreKeepsStateInMemory(t *testing.T) {
-	m, cmd := send(t, NewModel(nil, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
+	m, cmd := send(t, NewModel(nil, nil, storage.PlayerState{Gold: 60}, goldScreens(-50)), key("enter"))
 	if m.state.Gold != 10 || m.saving {
 		t.Errorf("memory-only change: gold=%d saving=%v, want 10/false", m.state.Gold, m.saving)
 	}

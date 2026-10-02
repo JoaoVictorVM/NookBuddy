@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"nookbuddy/internal/input"
 	"nookbuddy/internal/logging"
 	"nookbuddy/internal/storage"
 	"nookbuddy/internal/ui"
@@ -54,7 +55,11 @@ func run() int {
 		saver = store
 	}
 
-	model := ui.NewModel(saver, state, []ui.Screen{screens.Sell{}, screens.NewUpgrades(), screens.Customize{}})
+	source := input.NewSource()
+	_ = source.Start()
+	defer source.Stop()
+
+	model := ui.NewModel(saver, source, state, []ui.Screen{screens.Sell{}, screens.NewUpgrades(), screens.Customize{}})
 	_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
 
 	if errors.Is(err, tea.ErrProgramPanic) {

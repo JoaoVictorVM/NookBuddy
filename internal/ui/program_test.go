@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"nookbuddy/internal/input"
 	"nookbuddy/internal/storage"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ func runProgram(t *testing.T, m Model, input string) (Model, error) {
 
 func TestProgram_QuitSavesAndExitsCleanly(t *testing.T) {
 	store, _ := openTempStore(t)
-	m := NewModel(store, storage.PlayerState{Gold: 42}, threeScreens())
+	m := NewModel(store, nil, storage.PlayerState{Gold: 42}, threeScreens())
 
 	final, err := runProgram(t, m, "2q")
 	if err != nil {
@@ -74,7 +75,7 @@ func assertCrashRecorded(t *testing.T, m Model, err error, value, frame string) 
 func TestProgram_PanicInUpdateIsRecordedForCrashLog(t *testing.T) {
 	screens := threeScreens()
 	screens[0].(*fakeScreen).panicOnEnter = true
-	m := NewModel(nil, storage.PlayerState{}, screens)
+	m := NewModel(nil, nil, storage.PlayerState{}, screens)
 
 	_, err := runProgram(t, m, "\r")
 	assertCrashRecorded(t, m, err, "activate exploded", "(*fakeScreen).Activate")
@@ -83,7 +84,7 @@ func TestProgram_PanicInUpdateIsRecordedForCrashLog(t *testing.T) {
 func TestProgram_PanicInCommandIsRecordedForCrashLog(t *testing.T) {
 	screens := threeScreens()
 	screens[0].(*fakeScreen).activateCmd = func() tea.Msg { panic("command exploded") }
-	m := NewModel(nil, storage.PlayerState{}, screens)
+	m := NewModel(nil, nil, storage.PlayerState{}, screens)
 
 	_, err := runProgram(t, m, "\r")
 	assertCrashRecorded(t, m, err, "command exploded", "TestProgram_PanicInCommandIsRecordedForCrashLog")
@@ -92,7 +93,7 @@ func TestProgram_PanicInCommandIsRecordedForCrashLog(t *testing.T) {
 func TestProgram_PanicInViewIsRecordedForCrashLog(t *testing.T) {
 	screens := threeScreens()
 	screens[0].(*fakeScreen).panicOnView = true
-	m := NewModel(nil, storage.PlayerState{}, screens)
+	m := NewModel(nil, nil, storage.PlayerState{}, screens)
 
 	_, err := runProgram(t, m, "")
 	assertCrashRecorded(t, m, err, "view exploded", "(*fakeScreen).View")
@@ -104,5 +105,43 @@ func TestProgram_OnlyTheFirstPanicIsRecorded(t *testing.T) {
 	recorder.record("second")
 	if value, _, _ := recorder.report(); value != "first" {
 		t.Errorf("recorded = %v, want the first panic", value)
+	}
+}
+
+func TestProgram_InputEventsReachTheBarsAndAreSavedOnQuit(t *testing.T) {
+	store, _ := openTempStore(t)
+	source := newFakeSource(input.Available)
+	source.emit(input.Click, 7)
+	source.emit(input.Key, 11)
+	m := NewModel(store, source, storage.PlayerState{}, threeScreens())
+
+	keys, typist := io.Pipe()
+	go func() {
+		time.Sleep(700 * time.Millisecond)
+		_, _ = typist.Write([]byte("q"))
+	}()
+	t.Cleanup(func() { _ = typist.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	final, err := tea.NewProgram(m,
+		tea.WithContext(ctx),
+		tea.WithInput(keys),
+		tea.WithOutput(io.Discard),
+		tea.WithoutSignalHandler(),
+	).Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := final.(Model).state; got.ClicksProgress != 7 || got.KeysProgress != 11 {
+		t.Errorf("in-memory bars = %d/%d, want 7/11", got.ClicksProgress, got.KeysProgress)
+	}
+
+	saved, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if saved.ClicksProgress != 7 || saved.KeysProgress != 11 {
+		t.Errorf("saved bars = %d/%d, want 7/11", saved.ClicksProgress, saved.KeysProgress)
 	}
 }

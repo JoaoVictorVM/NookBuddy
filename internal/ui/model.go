@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"log/slog"
+	"nookbuddy/internal/input"
 	"nookbuddy/internal/storage"
 	"slices"
 	"time"
@@ -22,30 +23,45 @@ type saveResultMsg struct {
 }
 
 type Model struct {
-	screens      []Screen
-	active       int
-	selected     int
-	width        int
-	height       int
-	quitting     bool
-	saver        Saver
-	state        storage.PlayerState
-	saveTimeout  time.Duration
-	saving       bool
-	pendingSave  bool
-	saveFailed   bool
-	quitDeadline time.Time
-	crash        *crashRecorder
+	screens        []Screen
+	active         int
+	selected       int
+	width          int
+	height         int
+	quitting       bool
+	saver          Saver
+	state          storage.PlayerState
+	saveTimeout    time.Duration
+	saving         bool
+	pendingSave    bool
+	saveFailed     bool
+	quitDeadline   time.Time
+	dirty          bool
+	source         InputSource
+	hookStatus     input.Status
+	lastInputAt    time.Time
+	highlightUntil time.Time
+	now            func() time.Time
+	schedule       func(time.Duration, tea.Msg) tea.Cmd
+	crash          *crashRecorder
 }
 
-func NewModel(saver Saver, state storage.PlayerState, screens []Screen) Model {
-	return Model{
+func NewModel(saver Saver, source InputSource, state storage.PlayerState, screens []Screen) Model {
+	m := Model{
 		screens:     screens,
 		saver:       saver,
+		source:      source,
 		state:       state,
 		saveTimeout: saveTimeout,
+		hookStatus:  input.Unavailable,
+		now:         time.Now,
+		schedule:    scheduleTick,
 		crash:       &crashRecorder{},
 	}
+	if source != nil {
+		m.hookStatus = source.Status()
+	}
+	return m
 }
 
 func (m Model) Crash() (value any, stack []byte, ok bool) {
@@ -53,7 +69,7 @@ func (m Model) Crash() (value any, stack []byte, ok bool) {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return m.startTicks()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -83,6 +99,14 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case saveResultMsg:
 		return m.saveFinished(msg.err)
+	case inputTickMsg:
+		if m.source != nil {
+			return m.pollInput()
+		}
+	case input.InputEventMsg:
+		return m.applyEvents(msg.Events), nil
+	case autosaveTickMsg:
+		return m.autosave()
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 {
 			return m.handleRunes(msg.Runes)
@@ -176,6 +200,7 @@ func (m Model) requestSave() (Model, tea.Cmd) {
 
 func (m Model) startSave() (Model, tea.Cmd) {
 	m.saving = true
+	m.dirty = false
 	deadline := time.Now().Add(m.saveTimeout)
 	if m.quitting && deadline.After(m.quitDeadline) {
 		deadline = m.quitDeadline
@@ -189,6 +214,7 @@ func (m Model) saveFinished(err error) (Model, tea.Cmd) {
 	m.saving = false
 	m.saveFailed = err != nil
 	if err != nil {
+		m.dirty = true
 		slog.Error("nookbuddy: save failed", "error", err, "final", m.quitting)
 	}
 	if m.pendingSave {
