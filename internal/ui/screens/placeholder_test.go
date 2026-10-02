@@ -28,7 +28,3 @@ func assertPlaceholder(t *testing.T, screen ui.Screen, title string) {
 func TestSellPlaceholder_ReportsZeroItemsAndPlaceholderText(t *testing.T) {
 	assertPlaceholder(t, Sell{}, "Sell")
 }
-
-func TestCustomizePlaceholder_ReportsZeroItemsAndPlaceholderText(t *testing.T) {
-	assertPlaceholder(t, Customize{}, "Customize")
-}

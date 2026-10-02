@@ -303,7 +303,7 @@ func TestUpgrades_PurchaseThroughModelIsSavedImmediately(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	var model tea.Model = ui.NewModel(store, nil, storage.PlayerState{Gold: 60}, []ui.Screen{Sell{}, NewUpgrades(), Customize{}})
+	var model tea.Model = ui.NewModel(store, nil, storage.PlayerState{Gold: 60}, []ui.Screen{Sell{}, NewUpgrades(), NewCustomize()})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
 	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	runLeaves(cmd)

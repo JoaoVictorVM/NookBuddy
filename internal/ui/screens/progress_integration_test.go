@@ -71,7 +71,7 @@ func settle(model tea.Model, cmd tea.Cmd, within time.Duration) tea.Model {
 func TestUpgradePurchaseAppliesToTheNextClick(t *testing.T) {
 	saver := &recordingSaver{}
 	click := input.InputEventMsg{Events: []input.Event{{Type: input.Click}}}
-	model := tea.Model(ui.NewModel(saver, nil, storage.PlayerState{Gold: 60}, []ui.Screen{Sell{}, NewUpgrades(), Customize{}}))
+	model := tea.Model(ui.NewModel(saver, nil, storage.PlayerState{Gold: 60}, []ui.Screen{Sell{}, NewUpgrades(), NewCustomize()}))
 
 	model, purchase := drive(model, click, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}, tea.KeyMsg{Type: tea.KeyEnter})
 	if view := plain(model.View()); !strings.Contains(view, "Gold: 10") {
