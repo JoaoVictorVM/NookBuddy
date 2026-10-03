@@ -90,3 +90,21 @@ func TestUpgradePurchaseAppliesToTheNextClick(t *testing.T) {
 		t.Errorf("saved ClicksProgress = %d at Lv %d, want 1 before the purchase + 2 after it at Lv 1", got.ClicksProgress, got.UpgradeClicksLevel)
 	}
 }
+
+func TestCosmeticPurchaseRendersInTheRoomOnTheSameFrame(t *testing.T) {
+	model := tea.Model(ui.NewModel(&recordingSaver{}, nil, storage.PlayerState{Gold: 100}, []ui.Screen{Sell{}, NewUpgrades(), NewCustomize()}))
+	model, _ = drive(model, tea.WindowSizeMsg{Width: 120, Height: 30}, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	rug := "░▒▓▓▓▓▓▓▓▓▓▓▓▓▒░"
+	if strings.Contains(plain(model.View()), rug) {
+		t.Fatal("the rug is drawn before it was bought")
+	}
+
+	model, _ = drive(model,
+		tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyDown},
+		tea.KeyMsg{Type: tea.KeyEnter})
+
+	frame := plain(model.View())
+	if !strings.Contains(frame, "Rug added to your room") || !strings.Contains(frame, rug) {
+		t.Errorf("confirmation and rug must appear in the same frame:\n%s", frame)
+	}
+}
