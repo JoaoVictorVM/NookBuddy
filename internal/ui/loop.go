@@ -12,6 +12,7 @@ import (
 
 const (
 	inputPollInterval = 250 * time.Millisecond
+	animationInterval = 250 * time.Millisecond
 	highlightDuration = time.Second
 )
 
@@ -21,8 +22,9 @@ type InputSource interface {
 }
 
 type (
-	inputTickMsg    struct{}
-	autosaveTickMsg struct{}
+	inputTickMsg     struct{}
+	autosaveTickMsg  struct{}
+	animationTickMsg struct{}
 )
 
 func scheduleTick(after time.Duration, msg tea.Msg) tea.Cmd {
@@ -30,7 +32,7 @@ func scheduleTick(after time.Duration, msg tea.Msg) tea.Cmd {
 }
 
 func (m Model) startTicks() tea.Cmd {
-	var cmds []tea.Cmd
+	cmds := []tea.Cmd{m.schedule(animationInterval, animationTickMsg{})}
 	if m.source != nil {
 		cmds = append(cmds, m.schedule(inputPollInterval, inputTickMsg{}))
 	}

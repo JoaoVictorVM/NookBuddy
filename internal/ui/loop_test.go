@@ -113,10 +113,11 @@ func TestModel_InitSchedulesInputTickWhenSourceIsPresent(t *testing.T) {
 	}
 }
 
-func TestModel_InitDoesNotScheduleTickWhenSourceIsNil(t *testing.T) {
+func TestModel_InitDoesNotScheduleInputTickWhenSourceIsNil(t *testing.T) {
 	m, _ := loopModel(nil, nil, storage.PlayerState{})
-	if cmd := m.Init(); cmd != nil {
-		t.Errorf("Init without source or store returned %v, want nil", cmd)
+	msgs := collect(m.Init())
+	if contains(msgs, inputTickMsg{}) || contains(msgs, autosaveTickMsg{}) {
+		t.Errorf("Init without source or store scheduled %v, want neither input nor autosave ticks", msgs)
 	}
 }
 

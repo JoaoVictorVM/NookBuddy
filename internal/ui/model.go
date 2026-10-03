@@ -12,7 +12,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const saveTimeout = 2 * time.Second
+const (
+	saveTimeout  = 2 * time.Second
+	tooSmallText = "Terminal too small (need 100×28)"
+)
 
 type Saver interface {
 	Save(ctx context.Context, state storage.PlayerState) (storage.SaveResult, error)
@@ -37,6 +40,7 @@ type Model struct {
 	saveFailed     bool
 	quitDeadline   time.Time
 	dirty          bool
+	recovered      bool
 	source         InputSource
 	hookStatus     input.Status
 	lastInputAt    time.Time
@@ -60,6 +64,13 @@ func NewModel(saver Saver, source InputSource, state storage.PlayerState, screen
 	}
 	if source != nil {
 		m.hookStatus = source.Status()
+	}
+	return m
+}
+
+func (m Model) WithNotice(notice storage.Notice) Model {
+	if notice == storage.NoticeRecoveredFromCorruption {
+		m.recovered = true
 	}
 	return m
 }
@@ -107,6 +118,8 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.applyEvents(msg.Events), nil
 	case autosaveTickMsg:
 		return m.autosave()
+	case animationTickMsg:
+		return m, m.schedule(animationInterval, animationTickMsg{})
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 {
 			return m.handleRunes(msg.Runes)
@@ -131,7 +144,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch key := msg.String(); key {
+	key := msg.String()
+	if isNavigationKey(key) {
+		m.recovered = false
+	}
+
+	switch key {
 	case "q", "ctrl+c":
 		return m.quit()
 	case "1", "2", "3":
@@ -160,6 +178,14 @@ func (m Model) activate() (Model, tea.Cmd) {
 	m.state = next
 	m, save := m.requestSave()
 	return m, tea.Batch(cmd, save)
+}
+
+func isNavigationKey(key string) bool {
+	switch key {
+	case "1", "2", "3", "tab", "shift+tab", "up", "down", "k", "j":
+		return true
+	}
+	return false
 }
 
 func (m Model) switchTo(index int) Model {
@@ -247,12 +273,30 @@ func saveCmd(saver Saver, state storage.PlayerState, deadline time.Time) tea.Cmd
 	}
 }
 
+func (m Model) tooSmall() bool {
+	return m.width > 0 && m.height > 0 && (m.width < minWidth || m.height < minHeight)
+}
+
+func (m Model) snapshot() roomSnapshot {
+	return roomSnapshot{
+		state:          m.state,
+		now:            m.now(),
+		lastInputAt:    m.lastInputAt,
+		highlightUntil: m.highlightUntil,
+		notice:         activeNotice(m.saver == nil, m.hookStatus == input.Unavailable, m.recovered),
+	}
+}
+
 func (m Model) view() string {
+	if m.tooSmall() {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, Warning.Render(tooSmallText))
+	}
+
 	bodyHeight := 0
 	if m.height > 1 {
 		bodyHeight = m.height - 1
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, renderRoom(bodyHeight), m.renderScreen(bodyHeight))
+	body := lipgloss.JoinHorizontal(lipgloss.Top, renderRoom(bodyHeight, m.snapshot()), m.renderScreen(bodyHeight))
 	return lipgloss.JoinVertical(lipgloss.Left, body, renderFooter(m.quitting, m.saveFailed))
 }
 

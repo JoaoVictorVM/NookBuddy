@@ -416,7 +416,7 @@ func TestModel_ViewRendersActiveScreenAndFooter(t *testing.T) {
 	m, _ := send(t, newTestModel(), tea.WindowSizeMsg{Width: 120, Height: 30})
 	out := plain(m.View())
 
-	for _, want := range []string{"Sell body", "Sell │ Upgrades │ Customize", "Room view coming soon", "[1] Sell", "q quit"} {
+	for _, want := range []string{"Sell body", "Sell │ Upgrades │ Customize", "Projects ready: 0", "[1] Sell", "q quit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view is missing %q", want)
 		}
