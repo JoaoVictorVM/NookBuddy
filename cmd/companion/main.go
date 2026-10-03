@@ -48,7 +48,7 @@ func crash(recovered any, stack []byte) int {
 func run() int {
 	ctx := context.Background()
 
-	store, state := openStore(ctx)
+	store, state, notice := openStore(ctx)
 	var saver ui.Saver
 	if store != nil {
 		defer func() { _ = store.Close() }()
@@ -59,7 +59,7 @@ func run() int {
 	_ = source.Start()
 	defer source.Stop()
 
-	model := ui.NewModel(saver, source, state, []ui.Screen{screens.Sell{}, screens.NewUpgrades(), screens.NewCustomize()})
+	model := ui.NewModel(saver, source, state, []ui.Screen{screens.Sell{}, screens.NewUpgrades(), screens.NewCustomize()}).WithNotice(notice)
 	_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
 
 	if errors.Is(err, tea.ErrProgramPanic) {
@@ -74,17 +74,17 @@ func run() int {
 	return 0
 }
 
-func openStore(ctx context.Context) (*storage.Store, storage.PlayerState) {
+func openStore(ctx context.Context) (*storage.Store, storage.PlayerState, storage.Notice) {
 	path, err := storage.DefaultPath()
 	if err != nil {
 		slog.Error("nookbuddy: cannot resolve save location, running without saving", "error", err)
-		return nil, storage.PlayerState{}
+		return nil, storage.PlayerState{}, storage.NoticeNone
 	}
 
 	store, notice, err := storage.Open(ctx, path)
 	if err != nil {
 		slog.Error("nookbuddy: cannot open save file, running without saving", "path", path, "error", err)
-		return nil, storage.PlayerState{}
+		return nil, storage.PlayerState{}, storage.NoticeNone
 	}
 	if notice == storage.NoticeRecoveredFromCorruption {
 		slog.Warn("nookbuddy: previous save was unreadable and was moved aside", "path", path)
@@ -94,7 +94,7 @@ func openStore(ctx context.Context) (*storage.Store, storage.PlayerState) {
 	if err != nil {
 		slog.Error("nookbuddy: cannot load save file, running without saving", "path", path, "error", err)
 		_ = store.Close()
-		return nil, storage.PlayerState{}
+		return nil, storage.PlayerState{}, storage.NoticeNone
 	}
-	return store, state
+	return store, state, notice
 }
