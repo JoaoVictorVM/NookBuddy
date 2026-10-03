@@ -4,6 +4,11 @@ import "github.com/charmbracelet/lipgloss"
 
 const LeftPanelWidth = 40
 
+const (
+	minWidth  = 100
+	minHeight = 28
+)
+
 var (
 	AccentColor  = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
 	DimColor     = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"}
@@ -16,6 +21,14 @@ var (
 
 	SelectedRow = Accent.Bold(true)
 	Warning     = lipgloss.NewStyle().Foreground(WarningColor)
+
+	BarFilled = Accent
+	BarEmpty  = Dim
+
+	roomWalls     = lipgloss.NewStyle().Foreground(BorderColor)
+	roomItem      = lipgloss.NewStyle()
+	roomCharacter = Accent
+	roomSnore     = Dim
 
 	activeTab   = Accent.Bold(true).Underline(true)
 	inactiveTab = Dim
