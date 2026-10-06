@@ -71,7 +71,7 @@ func settle(model tea.Model, cmd tea.Cmd, within time.Duration) tea.Model {
 func TestUpgradePurchaseAppliesToTheNextClick(t *testing.T) {
 	saver := &recordingSaver{}
 	click := input.InputEventMsg{Events: []input.Event{{Type: input.Click}}}
-	model := tea.Model(ui.NewModel(saver, nil, storage.PlayerState{Gold: 60}, []ui.Screen{Sell{}, NewUpgrades(), NewCustomize()}))
+	model := tea.Model(ui.NewModel(saver, nil, storage.PlayerState{Gold: 60}, []ui.Screen{NewSell(), NewUpgrades(), NewCustomize()}))
 
 	model, purchase := drive(model, click, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}, tea.KeyMsg{Type: tea.KeyEnter})
 	if view := plain(model.View()); !strings.Contains(view, "Gold: 10") {
@@ -92,7 +92,7 @@ func TestUpgradePurchaseAppliesToTheNextClick(t *testing.T) {
 }
 
 func TestCosmeticPurchaseRendersInTheRoomOnTheSameFrame(t *testing.T) {
-	model := tea.Model(ui.NewModel(&recordingSaver{}, nil, storage.PlayerState{Gold: 100}, []ui.Screen{Sell{}, NewUpgrades(), NewCustomize()}))
+	model := tea.Model(ui.NewModel(&recordingSaver{}, nil, storage.PlayerState{Gold: 100}, []ui.Screen{NewSell(), NewUpgrades(), NewCustomize()}))
 	model, _ = drive(model, tea.WindowSizeMsg{Width: 120, Height: 30}, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
 	rug := "░▒▓▓▓▓▓▓▓▓▓▓▓▓▒░"
 	if strings.Contains(plain(model.View()), rug) {

@@ -59,7 +59,7 @@ func run() int {
 	_ = source.Start()
 	defer source.Stop()
 
-	model := ui.NewModel(saver, source, state, []ui.Screen{screens.Sell{}, screens.NewUpgrades(), screens.NewCustomize()}).WithNotice(notice)
+	model := ui.NewModel(saver, source, state, []ui.Screen{screens.NewSell(), screens.NewUpgrades(), screens.NewCustomize()}).WithNotice(notice)
 	_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
 
 	if errors.Is(err, tea.ErrProgramPanic) {

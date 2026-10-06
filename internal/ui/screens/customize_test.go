@@ -251,7 +251,7 @@ func TestCustomize_PurchasePersistsAcrossRelaunch(t *testing.T) {
 		t.Fatalf("storage.Open: %v", err)
 	}
 
-	var model tea.Model = ui.NewModel(store, nil, storage.PlayerState{Gold: 250}, []ui.Screen{Sell{}, NewUpgrades(), NewCustomize()})
+	var model tea.Model = ui.NewModel(store, nil, storage.PlayerState{Gold: 250}, []ui.Screen{NewSell(), NewUpgrades(), NewCustomize()})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	model, purchase := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
